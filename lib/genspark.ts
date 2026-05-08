@@ -29,26 +29,66 @@ export function createGensparkPayload(openaiRequest: OpenAIChatRequest): Genspar
   }
 }
 
+export async function callGensparkAPIViaCurl(
+  payload: GensparkRequest,
+  sessionId: string
+): Promise<AsyncGenerator<string>> {
+  const { spawn } = await import('child_process')
+
+  const payloadJson = JSON.stringify(payload)
+
+  return (async function* () {
+    const curl = spawn('curl', [
+      '-s',
+      '-N',
+      '-X', 'POST',
+      GENSPARK_API,
+      '-H', 'Content-Type: application/json',
+      '-H', `Cookie: session_id=${sessionId}`,
+      '-H', `User-Agent: ${USER_AGENT}`,
+      '-d', payloadJson
+    ])
+
+    for await (const chunk of curl.stdout) {
+      yield chunk.toString()
+    }
+
+    // Check for errors
+    const stderr: Buffer[] = []
+    for await (const chunk of curl.stderr) {
+      stderr.push(chunk)
+    }
+
+    if (stderr.length > 0) {
+      throw new Error(`Curl error: ${Buffer.concat(stderr).toString()}`)
+    }
+  })()
+}
+
 export async function callGensparkAPI(
   payload: GensparkRequest,
   sessionId: string
 ): Promise<Response> {
-  const response = await fetch(GENSPARK_API, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Cookie': `session_id=${sessionId}`,
-      'User-Agent': USER_AGENT,
-    },
-    body: JSON.stringify(payload),
+  // Use curl to bypass Cloudflare
+  const streamGenerator = await callGensparkAPIViaCurl(payload, sessionId)
+
+  const stream = new ReadableStream({
+    async start(controller) {
+      try {
+        for await (const chunk of streamGenerator) {
+          controller.enqueue(new TextEncoder().encode(chunk))
+        }
+        controller.close()
+      } catch (error) {
+        controller.error(error)
+      }
+    }
   })
 
-  if (!response.ok) {
-    const errorText = await response.text()
-    throw new Error(`Genspark API error: ${response.statusText} - ${errorText}`)
-  }
-
-  return response
+  return new Response(stream, {
+    status: 200,
+    headers: { 'Content-Type': 'text/event-stream' }
+  })
 }
 
 export async function* parseGensparkStream(
