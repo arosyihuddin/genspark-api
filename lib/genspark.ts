@@ -1,9 +1,6 @@
 import { GensparkRequest, OpenAIChatRequest, GensparkStreamEvent } from '@/types'
 import { mapModel } from './models'
 
-const GENSPARK_API = 'https://www.genspark.ai/api/agent/ask_proxy'
-const USER_AGENT = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36'
-
 export function createGensparkPayload(openaiRequest: OpenAIChatRequest): GensparkRequest {
   const model = mapModel(openaiRequest.model)
   const messages = openaiRequest.messages || []
@@ -29,7 +26,7 @@ export function createGensparkPayload(openaiRequest: OpenAIChatRequest): Genspar
   }
 }
 
-export async function callGensparkAPIViaCurl(
+export async function callGensparkAPI(
   payload: GensparkRequest,
   sessionId: string
 ): Promise<AsyncGenerator<string>> {
@@ -65,13 +62,6 @@ export async function callGensparkAPIViaCurl(
       }
     }
   })()
-}
-
-export async function callGensparkAPI(
-  payload: GensparkRequest,
-  sessionId: string
-): Promise<AsyncGenerator<string>> {
-  return callGensparkAPIViaCurl(payload, sessionId)
 }
 
 export async function* parseGensparkStreamFromGenerator(
