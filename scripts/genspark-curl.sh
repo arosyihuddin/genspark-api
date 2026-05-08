@@ -4,13 +4,10 @@
 
 SESSION_ID="$1"
 
-# Read payload from stdin
-read -r PAYLOAD
-
 curl -s -N -X POST https://www.genspark.ai/api/agent/ask_proxy \
   -H "Content-Type: application/json" \
   -H "Cookie: session_id=${SESSION_ID}" \
   -H "Origin: https://www.genspark.ai" \
   -H "Referer: https://www.genspark.ai/" \
   -H "User-Agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36" \
-  -d "${PAYLOAD}"
+  -d @-
