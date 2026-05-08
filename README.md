@@ -6,38 +6,30 @@ OpenAI-compatible API proxy untuk Genspark AI. Deploy ke Vercel dalam hitungan m
 
 - ✅ OpenAI-compatible API (`/v1/chat/completions`, `/v1/models`)
 - ✅ Streaming & non-streaming support
-- ✅ Multiple model support (GPT-4, Claude, Gemini, DeepSeek)
+- ✅ 18 models support (GPT-5, Claude, Grok, Gemini, DeepSeek, O3, Trinity)
 - ✅ Deploy ke Vercel dengan 1 klik
-- ✅ Optional API key authentication
+- ✅ No environment variables needed - users provide their own session ID
 
 ## Quick Start
 
 ### 1. Deploy ke Vercel
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/yourusername/genspark-openai-proxy)
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/arosyihuddin/genspark-api)
 
-### 2. Set Environment Variables
+### 2. Get Your Genspark Session ID
 
-Di Vercel dashboard, tambahkan environment variables:
-
-```bash
-GENSPARK_SESSION_ID=your-session-id-here
-API_KEY=your-optional-api-key  # Optional
-```
-
-**Cara mendapatkan Session ID:**
 1. Login ke https://www.genspark.ai
 2. Buka DevTools (F12) → Application → Cookies
 3. Copy nilai `session_id`
 
-### 3. Test API
+### 3. Use the API
 
 ```bash
 curl https://your-domain.vercel.app/api/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Authorization: Bearer YOUR_GENSPARK_SESSION_ID" \
   -d '{
-    "model": "gpt-4",
+    "model": "gpt-5.4",
     "messages": [
       {"role": "user", "content": "Hello!"}
     ],
@@ -47,14 +39,28 @@ curl https://your-domain.vercel.app/api/v1/chat/completions \
 
 ## Supported Models
 
-| OpenAI Model | Genspark Model |
-|--------------|----------------|
-| `gpt-4`, `gpt-4-turbo`, `gpt-4o` | Grok 4.20 |
-| `claude-sonnet-4-6` | Claude Sonnet 4.6 |
-| `claude-opus-4-6` | Claude Opus 4.6 |
-| `gpt-5`, `gpt-5-pro` | GPT-5 |
-| `gemini-2.5-pro` | Gemini 2.5 Pro |
-| `deepseek-v3`, `deepseek-r1` | DeepSeek |
+18 models tersedia:
+
+| Model ID | Provider |
+|----------|----------|
+| `claude-4-5-haiku` | Anthropic |
+| `claude-opus-4-6` | Anthropic |
+| `claude-opus-4-7` | Anthropic |
+| `claude-sonnet-4-6` | Anthropic |
+| `deep-seek-v4-pro` | DeepSeek |
+| `gemini-2.5-pro` | Google |
+| `gemini-3-flash-preview` | Google |
+| `gemini-3.1-pro-preview` | Google |
+| `gpt-5.2-pro` | OpenAI |
+| `gpt-5.4` | OpenAI |
+| `gpt-5.4-mini` | OpenAI |
+| `gpt-5.4-nano` | OpenAI |
+| `gpt-5.4-pro` | OpenAI |
+| `gpt-5.5` | OpenAI |
+| `grok-4.20-0309-non-reasoning` | xAI |
+| `grok-4.20-0309-reasoning` | xAI |
+| `o3-pro` | OpenAI |
+| `trinity-large-thinking` | Trinity |
 
 ## API Endpoints
 
@@ -65,7 +71,7 @@ OpenAI-compatible chat completions endpoint.
 **Request:**
 ```json
 {
-  "model": "gpt-4",
+  "model": "gpt-5.4",
   "messages": [
     {"role": "system", "content": "You are a helpful assistant"},
     {"role": "user", "content": "Hello!"}
@@ -74,11 +80,10 @@ OpenAI-compatible chat completions endpoint.
 }
 ```
 
-**Response (streaming):**
+**Headers:**
 ```
-data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4","choices":[{"index":0,"delta":{"content":"Hello"},"finish_reason":null}]}
-
-data: [DONE]
+Authorization: Bearer YOUR_GENSPARK_SESSION_ID
+Content-Type: application/json
 ```
 
 ### GET `/api/v1/models`
@@ -91,7 +96,7 @@ List available models.
   "object": "list",
   "data": [
     {
-      "id": "gpt-4",
+      "id": "gpt-5.4",
       "object": "model",
       "created": 1687882411,
       "owned_by": "genspark"
@@ -99,22 +104,6 @@ List available models.
   ]
 }
 ```
-
-## Local Development
-
-```bash
-# Install dependencies
-npm install
-
-# Create .env file
-cp .env.example .env
-# Edit .env and add your GENSPARK_SESSION_ID
-
-# Run dev server
-npm run dev
-```
-
-Visit http://localhost:3000
 
 ## Use with OpenAI SDK
 
@@ -125,11 +114,11 @@ from openai import OpenAI
 
 client = OpenAI(
     base_url="https://your-domain.vercel.app/api/v1",
-    api_key="your-api-key"
+    api_key="your-genspark-session-id"
 )
 
 response = client.chat.completions.create(
-    model="gpt-4",
+    model="gpt-5.4",
     messages=[
         {"role": "user", "content": "Hello!"}
     ],
@@ -147,11 +136,11 @@ import OpenAI from 'openai';
 
 const client = new OpenAI({
   baseURL: 'https://your-domain.vercel.app/api/v1',
-  apiKey: 'your-api-key'
+  apiKey: 'your-genspark-session-id'
 });
 
 const stream = await client.chat.completions.create({
-  model: 'gpt-4',
+  model: 'gpt-5.4',
   messages: [{ role: 'user', content: 'Hello!' }],
   stream: true,
 });
@@ -163,32 +152,29 @@ for await (const chunk of stream) {
 
 ## Authentication
 
-Jika `API_KEY` environment variable di-set, semua request harus menyertakan header:
+Each user provides their own Genspark session ID as the API key. No server-side configuration needed.
 
+**Format:**
 ```
-Authorization: Bearer YOUR_API_KEY
+Authorization: Bearer <your-genspark-session-id>
 ```
 
-Jika `API_KEY` tidak di-set, authentication dinonaktifkan.
+## Local Development
+
+```bash
+# Install dependencies
+npm install
+
+# Run dev server
+npm run dev
+```
+
+Visit http://localhost:3000
 
 ## Limitations
 
 - Session ID bisa expire, perlu diperbarui secara manual
 - Rate limiting tergantung pada akun Genspark Anda
-- Tidak ada support untuk function calling (belum ditest)
-
-## Troubleshooting
-
-**Error: GENSPARK_SESSION_ID not configured**
-- Pastikan environment variable `GENSPARK_SESSION_ID` sudah di-set di Vercel
-
-**Error: 401 Unauthorized dari Genspark**
-- Session ID Anda mungkin sudah expire
-- Login ulang ke Genspark dan dapatkan session ID baru
-
-**Streaming tidak bekerja**
-- Pastikan client Anda support SSE (Server-Sent Events)
-- Coba dengan `stream: false` untuk non-streaming mode
 
 ## License
 

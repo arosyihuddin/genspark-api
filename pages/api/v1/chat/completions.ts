@@ -1,6 +1,6 @@
 import type { NextApiRequest, NextApiResponse } from 'next'
 import { OpenAIChatRequest } from '@/types'
-import { authenticate, getSessionId } from '@/lib/auth'
+import { getSessionIdFromRequest } from '@/lib/auth'
 import { createGensparkPayload, callGensparkAPI, parseGensparkStream } from '@/lib/genspark'
 import {
   createStreamChunk,
@@ -42,7 +42,7 @@ async function handleStreamingResponse(
       }
     }
   } catch (error) {
-    console.error('Stream error:', error)
+    // Silent error handling
   } finally {
     res.end()
   }
@@ -67,7 +67,7 @@ async function handleNonStreamingResponse(
       }
     }
   } catch (error) {
-    console.error('Collection error:', error)
+    // Silent error handling
   }
 
   const response = createNonStreamResponse(requestId, fullContent)
@@ -82,12 +82,8 @@ export default async function handler(
     return res.status(405).json({ error: 'Method not allowed' })
   }
 
-  if (!authenticate(req)) {
-    return res.status(401).json({ error: 'Unauthorized' })
-  }
-
   try {
-    const sessionId = getSessionId()
+    const sessionId = getSessionIdFromRequest(req)
     const openaiRequest = req.body as OpenAIChatRequest
     const gensparkPayload = createGensparkPayload(openaiRequest)
     const requestId = `chatcmpl-${Date.now()}`
@@ -100,7 +96,6 @@ export default async function handler(
       await handleNonStreamingResponse(res, gensparkResponse, requestId)
     }
   } catch (error) {
-    console.error('Handler error:', error)
     const message = error instanceof Error ? error.message : 'Unknown error'
     res.status(500).json({ error: message })
   }

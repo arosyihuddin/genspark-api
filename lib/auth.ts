@@ -1,21 +1,17 @@
 import { NextApiRequest } from 'next'
 
-export function authenticate(req: NextApiRequest): boolean {
-  const apiKey = process.env.API_KEY
-  if (!apiKey) return true // No auth required
-
+export function getSessionIdFromRequest(req: NextApiRequest): string {
   const authHeader = req.headers.authorization
-  if (!authHeader) return false
 
-  const token = authHeader.replace('Bearer ', '')
-  return token === apiKey
-}
+  if (!authHeader) {
+    throw new Error('Authorization header required')
+  }
 
-export function getSessionId(): string {
-  const sessionId = process.env.GENSPARK_SESSION_ID || process.env.NEXT_PUBLIC_GENSPARK_SESSION_ID
+  const sessionId = authHeader.replace('Bearer ', '').trim()
 
   if (!sessionId) {
-    throw new Error('GENSPARK_SESSION_ID not configured')
+    throw new Error('Invalid session ID')
   }
+
   return sessionId
 }
