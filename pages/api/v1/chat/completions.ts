@@ -1,7 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next'
 import { OpenAIChatRequest } from '@/types'
 import { getSessionIdFromRequest } from '@/lib/auth'
-import { createGensparkPayload, callGensparkAPI, parseGensparkStream } from '@/lib/genspark'
+import { createGensparkPayload, callGensparkAPI, parseGensparkStreamFromGenerator } from '@/lib/genspark'
 import {
   createStreamChunk,
   createNonStreamResponse,
@@ -17,7 +17,7 @@ export const config = {
 
 async function handleStreamingResponse(
   res: NextApiResponse,
-  gensparkResponse: Response,
+  gensparkGenerator: AsyncGenerator<string>,
   requestId: string
 ): Promise<void> {
   res.setHeader('Content-Type', 'text/event-stream')
@@ -25,7 +25,7 @@ async function handleStreamingResponse(
   res.setHeader('Connection', 'keep-alive')
 
   try {
-    for await (const event of parseGensparkStream(gensparkResponse)) {
+    for await (const event of parseGensparkStreamFromGenerator(gensparkGenerator)) {
       if (!shouldProcessEvent(event)) continue
 
       if (isFinished(event)) {
@@ -50,13 +50,13 @@ async function handleStreamingResponse(
 
 async function handleNonStreamingResponse(
   res: NextApiResponse,
-  gensparkResponse: Response,
+  gensparkGenerator: AsyncGenerator<string>,
   requestId: string
 ): Promise<void> {
   let fullContent = ''
 
   try {
-    for await (const event of parseGensparkStream(gensparkResponse)) {
+    for await (const event of parseGensparkStreamFromGenerator(gensparkGenerator)) {
       if (!shouldProcessEvent(event)) continue
 
       if (isFinished(event)) break
@@ -88,12 +88,12 @@ export default async function handler(
     const gensparkPayload = createGensparkPayload(openaiRequest)
     const requestId = `chatcmpl-${Date.now()}`
 
-    const gensparkResponse = await callGensparkAPI(gensparkPayload, sessionId)
+    const gensparkGenerator = await callGensparkAPI(gensparkPayload, sessionId)
 
     if (openaiRequest.stream) {
-      await handleStreamingResponse(res, gensparkResponse, requestId)
+      await handleStreamingResponse(res, gensparkGenerator, requestId)
     } else {
-      await handleNonStreamingResponse(res, gensparkResponse, requestId)
+      await handleNonStreamingResponse(res, gensparkGenerator, requestId)
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error'

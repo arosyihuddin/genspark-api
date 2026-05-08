@@ -34,33 +34,35 @@ export async function callGensparkAPIViaCurl(
   sessionId: string
 ): Promise<AsyncGenerator<string>> {
   const { spawn } = await import('child_process')
+  const { join } = await import('path')
 
   const payloadJson = JSON.stringify(payload)
+  const scriptPath = join(process.cwd(), 'scripts', 'genspark-curl.sh')
 
   return (async function* () {
-    const curl = spawn('curl', [
-      '-s',
-      '-N',
-      '-X', 'POST',
-      GENSPARK_API,
-      '-H', 'Content-Type: application/json',
-      '-H', `Cookie: session_id=${sessionId}`,
-      '-H', `User-Agent: ${USER_AGENT}`,
-      '-d', payloadJson
-    ])
+    const proc = spawn(scriptPath, [sessionId], {
+      shell: true
+    })
 
-    for await (const chunk of curl.stdout) {
+    // Write payload to stdin
+    proc.stdin.write(payloadJson)
+    proc.stdin.end()
+
+    for await (const chunk of proc.stdout) {
       yield chunk.toString()
     }
 
     // Check for errors
     const stderr: Buffer[] = []
-    for await (const chunk of curl.stderr) {
+    for await (const chunk of proc.stderr) {
       stderr.push(chunk)
     }
 
     if (stderr.length > 0) {
-      throw new Error(`Curl error: ${Buffer.concat(stderr).toString()}`)
+      const errorMsg = Buffer.concat(stderr).toString()
+      if (errorMsg.trim()) {
+        throw new Error(`Curl error: ${errorMsg}`)
+      }
     }
   })()
 }
@@ -68,65 +70,33 @@ export async function callGensparkAPIViaCurl(
 export async function callGensparkAPI(
   payload: GensparkRequest,
   sessionId: string
-): Promise<Response> {
-  // Use curl to bypass Cloudflare
-  const streamGenerator = await callGensparkAPIViaCurl(payload, sessionId)
-
-  const stream = new ReadableStream({
-    async start(controller) {
-      try {
-        for await (const chunk of streamGenerator) {
-          controller.enqueue(new TextEncoder().encode(chunk))
-        }
-        controller.close()
-      } catch (error) {
-        controller.error(error)
-      }
-    }
-  })
-
-  return new Response(stream, {
-    status: 200,
-    headers: { 'Content-Type': 'text/event-stream' }
-  })
+): Promise<AsyncGenerator<string>> {
+  return callGensparkAPIViaCurl(payload, sessionId)
 }
 
-export async function* parseGensparkStream(
-  response: Response
+export async function* parseGensparkStreamFromGenerator(
+  generator: AsyncGenerator<string>
 ): AsyncGenerator<GensparkStreamEvent> {
-  const reader = response.body?.getReader()
-  if (!reader) {
-    throw new Error('Response body is not readable')
-  }
-
-  const decoder = new TextDecoder()
   let buffer = ''
 
-  try {
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
+  for await (const chunk of generator) {
+    buffer += chunk
+    const lines = buffer.split('\n')
+    buffer = lines.pop() || ''
 
-      buffer += decoder.decode(value, { stream: true })
-      const lines = buffer.split('\n')
-      buffer = lines.pop() || ''
+    for (const line of lines) {
+      if (!line.trim() || !line.startsWith('data: ')) continue
 
-      for (const line of lines) {
-        if (!line.trim() || !line.startsWith('data: ')) continue
+      const data = line.slice(6).trim()
+      if (data === '[DONE]') continue
 
-        const data = line.slice(6).trim()
-        if (data === '[DONE]') continue
-
-        try {
-          const parsed = JSON.parse(data) as GensparkStreamEvent
-          yield parsed
-        } catch {
-          // Skip invalid JSON
-        }
+      try {
+        const parsed = JSON.parse(data) as GensparkStreamEvent
+        yield parsed
+      } catch {
+        // Skip invalid JSON
       }
     }
-  } finally {
-    reader.releaseLock()
   }
 }
 
