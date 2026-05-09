@@ -46,8 +46,34 @@ def create_genspark_payload(openai_request: dict) -> dict:
     mapped_model = MODEL_MAP.get(model, model)
     messages = openai_request.get("messages", [])
     user_input = extract_user_input(messages)
+    tools = openai_request.get("tools", [])
 
-    return {
+    # If tools are provided, inject them into system message
+    if tools:
+        tools_description = "You have access to the following tools:\n\n"
+        for tool in tools:
+            func = tool.get("function", {})
+            tools_description += f"- {func.get('name')}: {func.get('description')}\n"
+            params = func.get('parameters', {}).get('properties', {})
+            if params:
+                tools_description += f"  Parameters: {', '.join(params.keys())}\n"
+
+        tools_description += "\nTo use a tool, respond with JSON in this format:\n"
+        tools_description += '{"tool_calls": [{"name": "function_name", "arguments": {"param": "value"}}]}'
+
+        # Inject tools into system message
+        system_message = None
+        for msg in messages:
+            if msg.get("role") == "system":
+                system_message = msg
+                break
+
+        if system_message:
+            system_message["content"] = f"{system_message['content']}\n\n{tools_description}"
+        else:
+            messages.insert(0, {"role": "system", "content": tools_description})
+
+    payload = {
         "ai_chat_model": mapped_model,
         "ai_chat_enable_search": False,
         "ai_chat_disable_personalization": False,
@@ -66,6 +92,8 @@ def create_genspark_payload(openai_request: dict) -> dict:
             "messages": messages,
         },
     }
+
+    return payload
 
 def parse_genspark_stream(response):
     """Parse Genspark SSE stream."""
@@ -104,6 +132,43 @@ def is_finished(event: dict) -> bool:
     """Check if stream is finished."""
     return event.get("type") == "project_field" and event.get("field_value") == "FINISHED"
 
+def parse_tool_calls_from_content(content: str) -> tuple[str, list]:
+    """Parse tool calls from model response content.
+
+    Returns: (cleaned_content, tool_calls)
+    """
+    import re
+
+    # Try to find JSON tool calls in the content
+    tool_calls = []
+    cleaned_content = content
+
+    # Look for JSON pattern: {"tool_calls": [...]}
+    json_pattern = r'\{["\']tool_calls["\']\s*:\s*\[.*?\]\s*\}'
+    matches = re.finditer(json_pattern, content, re.DOTALL)
+
+    for match in matches:
+        try:
+            tool_data = json.loads(match.group())
+            calls = tool_data.get("tool_calls", [])
+
+            for call in calls:
+                tool_calls.append({
+                    "id": f"call_{len(tool_calls)}",
+                    "type": "function",
+                    "function": {
+                        "name": call.get("name", ""),
+                        "arguments": json.dumps(call.get("arguments", {}))
+                    }
+                })
+
+            # Remove the JSON from content
+            cleaned_content = cleaned_content.replace(match.group(), "").strip()
+        except json.JSONDecodeError:
+            continue
+
+    return cleaned_content, tool_calls if tool_calls else None
+
 def create_stream_chunk(request_id: str, content: str, finish_reason: str = None) -> dict:
     """Create OpenAI-compatible stream chunk."""
     return {
@@ -120,6 +185,17 @@ def create_stream_chunk(request_id: str, content: str, finish_reason: str = None
 
 def create_non_stream_response(request_id: str, content: str) -> dict:
     """Create OpenAI-compatible non-stream response."""
+    # Parse tool calls from content
+    cleaned_content, tool_calls = parse_tool_calls_from_content(content)
+
+    message = {
+        "role": "assistant",
+        "content": cleaned_content if cleaned_content else None,
+    }
+
+    if tool_calls:
+        message["tool_calls"] = tool_calls
+
     return {
         "id": request_id,
         "object": "chat.completion",
@@ -127,11 +203,8 @@ def create_non_stream_response(request_id: str, content: str) -> dict:
         "model": "gpt-4",
         "choices": [{
             "index": 0,
-            "message": {
-                "role": "assistant",
-                "content": content,
-            },
-            "finish_reason": "stop",
+            "message": message,
+            "finish_reason": "tool_calls" if tool_calls else "stop",
         }],
         "usage": {
             "prompt_tokens": 0,
