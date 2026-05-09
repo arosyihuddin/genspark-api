@@ -117,15 +117,31 @@ def parse_genspark_stream(response):
 
 def should_process_event(event: dict) -> bool:
     """Check if event should be processed."""
+    event_type = event.get("type")
+    field_name = event.get("field_name")
+
     return (
-        (event.get("type") == "message_field_delta" and event.get("field_name") == "content") or
-        (event.get("type") == "project_field" and event.get("field_value") == "FINISHED")
+        (event_type == "message_field_delta" and field_name == "content") or
+        (event_type == "message_field" and field_name == "content" and event.get("delta") is not None) or
+        (event_type == "project_field" and event.get("field_value") == "FINISHED")
     )
 
 def extract_content(event: dict) -> str:
     """Extract content from event."""
-    if event.get("type") == "message_field_delta" and event.get("field_name") == "content":
+    event_type = event.get("type")
+    field_name = event.get("field_name")
+
+    # Prefer delta over field_value to avoid duplicates
+    if event_type == "message_field_delta" and field_name == "content":
         return event.get("delta", "")
+    elif event_type == "message_field" and field_name == "content":
+        # Only use field_value if it's incremental (not full content)
+        # Check if this is a delta-style update
+        delta = event.get("delta")
+        if delta is not None:
+            return delta
+        # Otherwise use field_value but this might cause duplicates
+        return event.get("field_value", "")
     return ""
 
 def is_finished(event: dict) -> bool:
@@ -238,12 +254,14 @@ async def stream_genspark_response(genspark_payload: dict, session_id: str, requ
 
     full_content = ""
     in_tool_call_json = False
+    finished_properly = False
 
     for event in parse_genspark_stream(response):
         if not should_process_event(event):
             continue
 
         if is_finished(event):
+            finished_properly = True
             # Parse tool calls from accumulated content
             cleaned_content, tool_calls = parse_tool_calls_from_content(full_content)
 
@@ -298,6 +316,46 @@ async def stream_genspark_response(genspark_payload: dict, session_id: str, requ
             # Stream normal content
             chunk = create_stream_chunk(request_id, content)
             yield f"data: {json.dumps(chunk)}\n\n"
+
+    # Handle case where stream ends without FINISHED event
+    if not finished_properly:
+        # Parse tool calls from accumulated content
+        cleaned_content, tool_calls = parse_tool_calls_from_content(full_content)
+
+        if tool_calls:
+            # Send tool calls as proper delta chunks
+            for i, tool_call in enumerate(tool_calls):
+                tool_chunk = {
+                    "id": request_id,
+                    "object": "chat.completion.chunk",
+                    "created": int(time.time()),
+                    "model": "gpt-4",
+                    "choices": [{
+                        "index": 0,
+                        "delta": {
+                            "tool_calls": [{
+                                "index": i,
+                                "id": tool_call["id"],
+                                "type": tool_call["type"],
+                                "function": {
+                                    "name": tool_call["function"]["name"],
+                                    "arguments": tool_call["function"]["arguments"]
+                                }
+                            }]
+                        },
+                        "finish_reason": None,
+                    }],
+                }
+                yield f"data: {json.dumps(tool_chunk)}\n\n"
+
+            # Final chunk with tool_calls finish reason
+            final_chunk = create_stream_chunk(request_id, "", "tool_calls")
+        else:
+            # Normal finish
+            final_chunk = create_stream_chunk(request_id, "", "stop")
+
+        yield f"data: {json.dumps(final_chunk)}\n\n"
+        yield "data: [DONE]\n\n"
 
 @app.post("/api/v1/chat/completions")
 async def chat_completions(request: Request):

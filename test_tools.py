@@ -5,7 +5,7 @@ from openai import OpenAI
 
 client = OpenAI(
     base_url="http://localhost:8009/api/v1",
-    api_key="ebb824bc-8eeb-413a-a58b-392aa0f277d7:c809ce5d5b80b956860e8561d2eaefd7151cd668c6baeaf12048b6c21b8fb7e7"
+    api_key="497d7568-4f1f-4d5f-89b9-2ab7e3b73a72:14127ec0a770888080d767aeea396edb706b0df1a7c836ccaf0e1961045bc657""
 )
 
 # Test 1: Simple message without tools
