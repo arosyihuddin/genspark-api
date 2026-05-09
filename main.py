@@ -1,0 +1,248 @@
+from fastapi import FastAPI, Request, Response
+from fastapi.responses import StreamingResponse
+import requests
+import json
+import time
+from typing import AsyncGenerator
+
+app = FastAPI()
+
+MODEL_MAP = {
+    "gpt-3.5-turbo": "gpt-4o-mini",
+    "gpt-4": "gpt-4o",
+    "gpt-4-turbo": "gpt-4o",
+    "gpt-4o": "gpt-4o",
+    "gpt-5.4": "gpt-5.4",
+    "claude-3-5-sonnet-20241022": "claude-sonnet-4-6",
+    "claude-opus-4-7": "claude-opus-4-7",
+}
+
+def extract_user_input(messages: list) -> str:
+    """Extract user input from messages, handling both string and array content."""
+    if not messages:
+        return ""
+
+    last_message = messages[-1]
+    content = last_message.get("content", "")
+
+    # Handle string content
+    if isinstance(content, str):
+        return content
+
+    # Handle array content (OpenCode format)
+    if isinstance(content, list):
+        text_parts = [
+            item.get("text", "")
+            for item in content
+            if isinstance(item, dict) and item.get("type") == "text" and item.get("text")
+        ]
+        return " ".join(text_parts)
+
+    return ""
+
+def create_genspark_payload(openai_request: dict) -> dict:
+    """Convert OpenAI format to Genspark format."""
+    model = openai_request.get("model", "gpt-4")
+    mapped_model = MODEL_MAP.get(model, model)
+    messages = openai_request.get("messages", [])
+    user_input = extract_user_input(messages)
+
+    return {
+        "ai_chat_model": mapped_model,
+        "ai_chat_enable_search": False,
+        "ai_chat_disable_personalization": False,
+        "use_moa_proxy": False,
+        "moa_models": [],
+        "writingContent": None,
+        "type": "ai_chat",
+        "project_id": None,
+        "messages": messages,
+        "user_s_input": user_input,
+        "g_recaptcha_token": "",
+        "is_private": True,
+        "push_token": "",
+        "session_state": {
+            "steps": [],
+            "messages": messages,
+        },
+    }
+
+def parse_genspark_stream(response):
+    """Parse Genspark SSE stream."""
+    for line in response.iter_lines():
+        if not line:
+            continue
+
+        line = line.decode('utf-8')
+        if not line.startswith('data: '):
+            continue
+
+        data = line[6:].strip()
+        if data == '[DONE]':
+            continue
+
+        try:
+            event = json.loads(data)
+            yield event
+        except json.JSONDecodeError:
+            continue
+
+def should_process_event(event: dict) -> bool:
+    """Check if event should be processed."""
+    return (
+        (event.get("type") == "message_field_delta" and event.get("field_name") == "content") or
+        (event.get("type") == "project_field" and event.get("field_value") == "FINISHED")
+    )
+
+def extract_content(event: dict) -> str:
+    """Extract content from event."""
+    if event.get("type") == "message_field_delta" and event.get("field_name") == "content":
+        return event.get("delta", "")
+    return ""
+
+def is_finished(event: dict) -> bool:
+    """Check if stream is finished."""
+    return event.get("type") == "project_field" and event.get("field_value") == "FINISHED"
+
+def create_stream_chunk(request_id: str, content: str, finish_reason: str = None) -> dict:
+    """Create OpenAI-compatible stream chunk."""
+    return {
+        "id": request_id,
+        "object": "chat.completion.chunk",
+        "created": int(time.time()),
+        "model": "gpt-4",
+        "choices": [{
+            "index": 0,
+            "delta": {} if finish_reason else {"content": content},
+            "finish_reason": finish_reason,
+        }],
+    }
+
+def create_non_stream_response(request_id: str, content: str) -> dict:
+    """Create OpenAI-compatible non-stream response."""
+    return {
+        "id": request_id,
+        "object": "chat.completion",
+        "created": int(time.time()),
+        "model": "gpt-4",
+        "choices": [{
+            "index": 0,
+            "message": {
+                "role": "assistant",
+                "content": content,
+            },
+            "finish_reason": "stop",
+        }],
+        "usage": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+        },
+    }
+
+async def stream_genspark_response(genspark_payload: dict, session_id: str, request_id: str) -> AsyncGenerator[str, None]:
+    """Stream response from Genspark API."""
+    headers = {
+        'Content-Type': 'application/json',
+        'Cookie': f'session_id={session_id}',
+        'Origin': 'https://www.genspark.ai',
+        'Referer': 'https://www.genspark.ai/',
+        'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36',
+    }
+
+    response = requests.post(
+        'https://www.genspark.ai/api/agent/ask_proxy',
+        headers=headers,
+        json=genspark_payload,
+        stream=True
+    )
+
+    if response.status_code != 200:
+        raise Exception(f"Genspark API error: {response.status_code}")
+
+    for event in parse_genspark_stream(response):
+        if not should_process_event(event):
+            continue
+
+        if is_finished(event):
+            final_chunk = create_stream_chunk(request_id, "", "stop")
+            yield f"data: {json.dumps(final_chunk)}\n\n"
+            yield "data: [DONE]\n\n"
+            break
+
+        content = extract_content(event)
+        if content:
+            chunk = create_stream_chunk(request_id, content)
+            yield f"data: {json.dumps(chunk)}\n\n"
+
+@app.post("/api/v1/chat/completions")
+async def chat_completions(request: Request):
+    """OpenAI-compatible chat completions endpoint."""
+    # Get session ID from Authorization header
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        return Response(
+            content=json.dumps({"error": "Missing or invalid Authorization header"}),
+            status_code=401,
+            media_type="application/json"
+        )
+
+    session_id = auth_header[7:]  # Remove "Bearer " prefix
+
+    # Parse request body
+    body = await request.json()
+
+    # Create Genspark payload
+    genspark_payload = create_genspark_payload(body)
+    request_id = f"chatcmpl-{int(time.time() * 1000)}"
+
+    # Handle streaming
+    if body.get("stream", False):
+        return StreamingResponse(
+            stream_genspark_response(genspark_payload, session_id, request_id),
+            media_type="text/event-stream"
+        )
+
+    # Handle non-streaming
+    full_content = ""
+    headers = {
+        'Content-Type': 'application/json',
+        'Cookie': f'session_id={session_id}',
+        'Origin': 'https://www.genspark.ai',
+        'Referer': 'https://www.genspark.ai/',
+        'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36',
+    }
+
+    response = requests.post(
+        'https://www.genspark.ai/api/agent/ask_proxy',
+        headers=headers,
+        json=genspark_payload,
+        stream=True
+    )
+
+    for event in parse_genspark_stream(response):
+        if not should_process_event(event):
+            continue
+        if is_finished(event):
+            break
+        content = extract_content(event)
+        if content:
+            full_content += content
+
+    return create_non_stream_response(request_id, full_content)
+
+@app.get("/api/v1/models")
+async def list_models():
+    """List available models."""
+    return {
+        "object": "list",
+        "data": [
+            {"id": model, "object": "model", "owned_by": "genspark"}
+            for model in MODEL_MAP.keys()
+        ]
+    }
+
+@app.get("/")
+async def root():
+    """Root endpoint."""
+    return {"message": "Genspark OpenAI Proxy API (Python)"}

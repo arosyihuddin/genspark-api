@@ -1,13 +1,18 @@
-# Genspark OpenAI Proxy
+# Genspark OpenAI Proxy (Python)
 
-OpenAI-compatible API proxy untuk Genspark AI. Deploy ke Vercel dalam hitungan menit.
+OpenAI-compatible API proxy untuk Genspark AI, built with FastAPI and Python.
+
+## Why Python?
+
+Node.js implementation memerlukan shell scripts untuk bypass Cloudflare protection. Python's `requests` library dapat bypass Cloudflare langsung tanpa external dependencies, making it deployable to serverless platforms.
 
 ## Features
 
 - ✅ OpenAI-compatible API (`/v1/chat/completions`, `/v1/models`)
 - ✅ Streaming & non-streaming support
-- ✅ 18 models support (GPT-5, Claude, Grok, Gemini, DeepSeek, O3, Trinity)
-- ✅ Deploy ke Vercel dengan 1 klik
+- ✅ Support multiple models (GPT, Claude, Grok, Gemini, DeepSeek, O3, Trinity)
+- ✅ Bypass Cloudflare protection natively
+- ✅ Deploy ke Vercel/Railway/Render
 - ✅ No environment variables needed - users provide their own session ID
 
 ## Quick Start
@@ -162,14 +167,17 @@ Authorization: Bearer <your-genspark-session-id>
 ## Local Development
 
 ```bash
+# Install uv (if not already installed)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
 # Install dependencies
-npm install
+uv pip install fastapi uvicorn requests
 
 # Run dev server
-npm run dev
+uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-Visit http://localhost:3000
+Visit http://localhost:8000
 
 ## Limitations
 
