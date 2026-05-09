@@ -171,13 +171,13 @@ Authorization: Bearer <your-genspark-session-id>
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
 # Install dependencies
-uv pip install fastapi uvicorn requests
+uv sync
 
 # Run dev server
-uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+python main.py
 ```
 
-Visit http://localhost:8000
+Visit http://localhost:8009
 
 ## Limitations
 
