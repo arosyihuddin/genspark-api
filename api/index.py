@@ -363,6 +363,9 @@ async def stream_genspark_response(genspark_payload: dict, session_id: str, requ
         if not full_content:
             import sys
             print("WARNING: Empty response from Genspark API. Session may be out of credits.", file=sys.stderr)
+            # Send error message to client
+            error_chunk = create_stream_chunk(request_id, "⚠️ Session out of credits. Please update your session ID.")
+            yield f"data: {json.dumps(error_chunk)}\n\n"
 
         if tool_calls:
             for chunk in send_tool_calls_chunks(request_id, tool_calls):
@@ -417,6 +420,7 @@ async def chat_completions(request: Request):
     if not full_content:
         import sys
         print("WARNING: Empty response from Genspark API. Session may be out of credits.", file=sys.stderr)
+        full_content = "⚠️ Session out of credits. Please update your session ID."
 
     return create_non_stream_response(request_id, full_content)
 
