@@ -2,7 +2,7 @@
 name = "genspark-api"
 version = "0.1.0"
 description = "OpenAI-compatible API proxy for Genspark AI with tool calling support"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.136.1",
     "requests>=2.33.1",
