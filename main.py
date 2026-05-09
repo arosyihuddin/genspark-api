@@ -8,13 +8,42 @@ from typing import AsyncGenerator
 app = FastAPI()
 
 MODEL_MAP = {
+    # Legacy OpenAI mappings
     "gpt-3.5-turbo": "gpt-4o-mini",
     "gpt-4": "gpt-4o",
     "gpt-4-turbo": "gpt-4o",
     "gpt-4o": "gpt-4o",
+
+    # OpenAI models
+    "gpt-5.2-pro": "gpt-5.2-pro",
     "gpt-5.4": "gpt-5.4",
+    "gpt-5.4-mini": "gpt-5.4-mini",
+    "gpt-5.4-nano": "gpt-5.4-nano",
+    "gpt-5.4-pro": "gpt-5.4-pro",
+    "gpt-5.5": "gpt-5.5",
+    "o3-pro": "o3-pro",
+
+    # Anthropic Claude models
     "claude-3-5-sonnet-20241022": "claude-sonnet-4-6",
+    "claude-4-5-haiku": "claude-4-5-haiku",
+    "claude-opus-4-6": "claude-opus-4-6",
     "claude-opus-4-7": "claude-opus-4-7",
+    "claude-sonnet-4-6": "claude-sonnet-4-6",
+
+    # DeepSeek models
+    "deep-seek-v4-pro": "deep-seek-v4-pro",
+
+    # Google Gemini models
+    "gemini-2.5-pro": "gemini-2.5-pro",
+    "gemini-3-flash-preview": "gemini-3-flash-preview",
+    "gemini-3.1-pro-preview": "gemini-3.1-pro-preview",
+
+    # xAI Grok models
+    "grok-4.20-0309-non-reasoning": "grok-4.20-0309-non-reasoning",
+    "grok-4.20-0309-reasoning": "grok-4.20-0309-reasoning",
+
+    # Trinity models
+    "trinity-large-thinking": "trinity-large-thinking",
 }
 
 def extract_user_input(messages: list) -> str:
