@@ -5,9 +5,23 @@ from openai import OpenAI
 
 client = OpenAI(
     base_url="http://localhost:8009/api/v1",
-    api_key="90817985-8bd3-47c8-b731-4493b9a5e333:227691b0fa9c2b2434711f06d5a0722e26582f02c870c288c6a28f767b64a6f3"
+    api_key="ebb824bc-8eeb-413a-a58b-392aa0f277d7:c809ce5d5b80b956860e8561d2eaefd7151cd668c6baeaf12048b6c21b8fb7e7"
 )
 
+# Test 1: Simple message without tools
+print("=== Test 1: Simple message ===")
+response = client.chat.completions.create(
+    model="gpt-5.4",
+    messages=[
+        {"role": "user", "content": "say hello"}
+    ],
+    stream=False
+)
+print(f"Content: {response.choices[0].message.content}")
+print()
+
+# Test 2: Message with tools
+print("=== Test 2: With tools ===")
 tools = [
     {
         "type": "function",
@@ -37,9 +51,6 @@ response = client.chat.completions.create(
     stream=False
 )
 
-print("Response:")
-print(response)
-print("\nMessage:")
-print(response.choices[0].message)
-print("\nTool calls:")
-print(response.choices[0].message.tool_calls)
+print(f"Content: {response.choices[0].message.content}")
+print(f"Tool calls: {response.choices[0].message.tool_calls}")
+

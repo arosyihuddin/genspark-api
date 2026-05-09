@@ -188,9 +188,12 @@ def create_non_stream_response(request_id: str, content: str) -> dict:
     # Parse tool calls from content
     cleaned_content, tool_calls = parse_tool_calls_from_content(content)
 
+    # Use cleaned content if available, otherwise use original
+    final_content = cleaned_content if cleaned_content else content
+
     message = {
         "role": "assistant",
-        "content": cleaned_content if cleaned_content else None,
+        "content": final_content if not tool_calls else None,
     }
 
     if tool_calls:
@@ -233,18 +236,66 @@ async def stream_genspark_response(genspark_payload: dict, session_id: str, requ
     if response.status_code != 200:
         raise Exception(f"Genspark API error: {response.status_code}")
 
+    full_content = ""
+    in_tool_call_json = False
+
     for event in parse_genspark_stream(response):
         if not should_process_event(event):
             continue
 
         if is_finished(event):
-            final_chunk = create_stream_chunk(request_id, "", "stop")
+            # Parse tool calls from accumulated content
+            cleaned_content, tool_calls = parse_tool_calls_from_content(full_content)
+
+            if tool_calls:
+                # Send tool calls as proper delta chunks
+                for i, tool_call in enumerate(tool_calls):
+                    tool_chunk = {
+                        "id": request_id,
+                        "object": "chat.completion.chunk",
+                        "created": int(time.time()),
+                        "model": "gpt-4",
+                        "choices": [{
+                            "index": 0,
+                            "delta": {
+                                "tool_calls": [{
+                                    "index": i,
+                                    "id": tool_call["id"],
+                                    "type": tool_call["type"],
+                                    "function": {
+                                        "name": tool_call["function"]["name"],
+                                        "arguments": tool_call["function"]["arguments"]
+                                    }
+                                }]
+                            },
+                            "finish_reason": None,
+                        }],
+                    }
+                    yield f"data: {json.dumps(tool_chunk)}\n\n"
+
+                # Final chunk with tool_calls finish reason
+                final_chunk = create_stream_chunk(request_id, "", "tool_calls")
+            else:
+                # Normal finish
+                final_chunk = create_stream_chunk(request_id, "", "stop")
+
             yield f"data: {json.dumps(final_chunk)}\n\n"
             yield "data: [DONE]\n\n"
             break
 
         content = extract_content(event)
         if content:
+            full_content += content
+
+            # Detect start of tool call JSON - check for opening brace
+            if not in_tool_call_json and (content.strip().startswith('{') or '{"tool' in full_content):
+                in_tool_call_json = True
+
+            # Don't stream if we're in tool call JSON
+            if in_tool_call_json:
+                continue
+
+            # Stream normal content
             chunk = create_stream_chunk(request_id, content)
             yield f"data: {json.dumps(chunk)}\n\n"
 
