@@ -42,7 +42,8 @@ async function handleStreamingResponse(
       }
     }
   } catch (error) {
-    // Silent error handling
+    console.error('[Stream] Error:', error)
+    throw error
   } finally {
     res.end()
   }
@@ -58,7 +59,6 @@ async function handleNonStreamingResponse(
   try {
     for await (const event of parseGensparkStreamFromGenerator(gensparkGenerator)) {
       if (!shouldProcessEvent(event)) continue
-
       if (isFinished(event)) break
 
       const content = extractContent(event)
@@ -67,7 +67,7 @@ async function handleNonStreamingResponse(
       }
     }
   } catch (error) {
-    // Silent error handling
+    console.error('[NonStream] Error:', error)
   }
 
   const response = createNonStreamResponse(requestId, fullContent)

@@ -1,9 +1,35 @@
 import { GensparkRequest, OpenAIChatRequest, GensparkStreamEvent } from '@/types'
 import { mapModel } from './models'
 
+function extractUserInput(messages: any[]): string {
+  if (!messages || messages.length === 0) return ''
+
+  const lastMessage = messages[messages.length - 1]
+  if (!lastMessage) return ''
+
+  const content = lastMessage.content
+
+  // Handle string content
+  if (typeof content === 'string') {
+    return content
+  }
+
+  // Handle array content (OpenCode format)
+  if (Array.isArray(content)) {
+    // Extract text from array of content blocks
+    const textParts = content
+      .filter((item: any) => item.type === 'text' && item.text)
+      .map((item: any) => item.text)
+    return textParts.join(' ')
+  }
+
+  return ''
+}
+
 export function createGensparkPayload(openaiRequest: OpenAIChatRequest): GensparkRequest {
   const model = mapModel(openaiRequest.model)
   const messages = openaiRequest.messages || []
+  const userInput = extractUserInput(messages)
 
   return {
     ai_chat_model: model,
@@ -15,7 +41,7 @@ export function createGensparkPayload(openaiRequest: OpenAIChatRequest): Genspar
     type: 'ai_chat',
     project_id: null,
     messages: messages,
-    user_s_input: messages[messages.length - 1]?.content || '',
+    user_s_input: userInput,
     g_recaptcha_token: '',
     is_private: true,
     push_token: '',
@@ -41,25 +67,25 @@ export async function callGensparkAPI(
       shell: true
     })
 
+    // Collect stderr in background
+    let stderrData = ''
+    proc.stderr.on('data', (chunk) => {
+      stderrData += chunk.toString()
+    })
+
     // Write payload to stdin
     proc.stdin.write(payloadJson)
     proc.stdin.end()
 
+    // Stream stdout
     for await (const chunk of proc.stdout) {
       yield chunk.toString()
     }
 
-    // Check for errors
-    const stderr: Buffer[] = []
-    for await (const chunk of proc.stderr) {
-      stderr.push(chunk)
-    }
-
-    if (stderr.length > 0) {
-      const errorMsg = Buffer.concat(stderr).toString()
-      if (errorMsg.trim()) {
-        throw new Error(`Curl error: ${errorMsg}`)
-      }
+    // Check for errors after streaming completes
+    if (stderrData.trim()) {
+      console.error('[Genspark] Stderr:', stderrData)
+      throw new Error(`Curl error: ${stderrData}`)
     }
   })()
 }
